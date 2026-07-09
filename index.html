@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analisi Qualità Ricezione</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1420; --bg2:#161d2e; --card:#1b2338; --card-border:#2a3450;
+    --text:#eef1f8; --text-dim:#9aa4bd; --accent:#ff7a1a; --accent2:#2ea8ff;
+    --good:#33c17a; --mid:#f2c744; --bad:#ef4d5e; --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:linear-gradient(180deg,var(--bg),var(--bg2));color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;min-height:100vh;}
+  header{padding:22px 24px 10px;text-align:center;}
+  header h1{margin:0;font-size:1.5rem;letter-spacing:.3px;}
+  header p{margin:6px 0 0;color:var(--text-dim);font-size:.9rem;}
+  nav{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;padding:14px;}
+  nav button{background:var(--card);border:1px solid var(--card-border);color:var(--text-dim);
+    padding:9px 16px;border-radius:999px;cursor:pointer;font-size:.85rem;font-weight:600;transition:.15s;}
+  nav button.active{background:var(--accent);border-color:var(--accent);color:#1a1000;}
+  main{max-width:1080px;margin:0 auto;padding:0 16px 60px;}
+  .view{display:none;} .view.active{display:block;}
+  .card{background:var(--card);border:1px solid var(--card-border);border-radius:var(--radius);
+    padding:18px;margin-bottom:16px;}
+  .card h2{margin:0 0 14px;font-size:1.05rem;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  select,input{background:var(--bg2);border:1px solid var(--card-border);color:var(--text);
+    border-radius:8px;padding:9px 10px;font-size:.9rem;}
+  input[type=text],input[type=date]{min-width:150px;}
+  .btn{background:var(--accent2);border:none;color:#04101c;font-weight:700;border-radius:8px;
+    padding:9px 14px;cursor:pointer;font-size:.85rem;}
+  .btn.secondary{background:var(--card-border);color:var(--text);}
+  .btn.danger{background:var(--bad);color:#180507;}
+  .player-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .player-chip{background:var(--bg2);border:2px solid var(--card-border);border-radius:10px;
+    padding:12px;text-align:center;cursor:pointer;font-weight:700;transition:.15s;}
+  .player-chip.selected{border-color:var(--accent);background:#2a1a0d;}
+  .code-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px;}
+  .code-btn{padding:20px 8px;border-radius:12px;border:none;font-size:1.4rem;font-weight:800;
+    cursor:pointer;color:#08101c;}
+  .code-btn small{display:block;font-size:.62rem;font-weight:600;margin-top:4px;opacity:.85;}
+  .code-perf{background:var(--good);} .code-pos{background:#7fd99a;}
+  .code-half{background:var(--mid);} .code-neg{background:#f2a444;}
+  .code-err{background:var(--bad);} .code-ace{background:#b23347;color:#fff;}
+  .tally{display:flex;justify-content:center;gap:14px;margin-top:14px;flex-wrap:wrap;font-size:.85rem;color:var(--text-dim);}
+  .tally b{color:var(--text);}
+  table{width:100%;border-collapse:collapse;font-size:.85rem;}
+  th,td{padding:8px 10px;text-align:center;border-bottom:1px solid var(--card-border);}
+  th{color:var(--text-dim);font-weight:600;font-size:.75rem;text-transform:uppercase;}
+  tr:hover td{background:rgba(255,255,255,.02);}
+  .name-col{text-align:left;font-weight:700;}
+  .pos-val{color:var(--good);font-weight:700;} .neg-val{color:var(--bad);font-weight:700;}
+  canvas{max-width:100%;}
+  .compare-list{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+  .compare-list label{background:var(--bg2);border:1px solid var(--card-border);border-radius:8px;
+    padding:6px 10px;font-size:.8rem;display:flex;gap:6px;align-items:center;cursor:pointer;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--good);
+    color:#04150c;padding:10px 18px;border-radius:8px;font-weight:700;font-size:.85rem;
+    opacity:0;pointer-events:none;transition:.25s;z-index:99;}
+  .toast.show{opacity:1;}
+  .legend-note{font-size:.78rem;color:var(--text-dim);margin-top:10px;line-height:1.5;}
+  .empty{color:var(--text-dim);text-align:center;padding:30px 10px;font-size:.9rem;}
+  .session-tag{display:inline-block;background:var(--bg2);border:1px solid var(--card-border);
+    border-radius:6px;padding:4px 9px;font-size:.78rem;margin:3px;cursor:pointer;}
+  .session-tag.active{border-color:var(--accent2);color:var(--accent2);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🏐 Analisi Qualità Ricezione</h1>
+  <p>Percentuale positiva · Percentuale perfetta · Efficienza — scala #, +, !, -, /, =</p>
+</header>
+
+<nav>
+  <button data-view="entry" class="active">Inserimento</button>
+  <button data-view="stats">Statistiche</button>
+  <button data-view="radar">Confronto Radar</button>
+  <button data-view="players">Giocatori</button>
+  <button data-view="data">Dati / Export</button>
+</nav>
+
+<main>
+
+  <!-- ENTRY -->
+  <div class="view active" id="view-entry">
+    <div class="card">
+      <h2>Sessione</h2>
+      <div class="row">
+        <input type="date" id="sessDate">
+        <input type="text" id="sessOpp" placeholder="Avversario / partita">
+        <button class="btn" id="newSessBtn">Nuova sessione</button>
+      </div>
+      <div id="sessTags" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="card">
+      <h2>Seleziona giocatore</h2>
+      <div class="player-grid" id="entryPlayerGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2>Codice ricezione <span id="entryPlayerLabel" style="color:var(--accent);"></span></h2>
+      <div class="code-grid">
+        <button class="code-btn code-perf" data-code="#">#<small>Perfetta</small></button>
+        <button class="code-btn code-pos" data-code="+">+<small>Buona</small></button>
+        <button class="code-btn code-half" data-code="!">!<small>Mediocre</small></button>
+        <button class="code-btn code-neg" data-code="-">−<small>Negativa</small></button>
+        <button class="code-btn code-err" data-code="/">/<small>Errore</small></button>
+        <button class="code-btn code-ace" data-code="=">=<small>Ace subito</small></button>
+      </div>
+      <div class="tally" id="liveTally"></div>
+      <div class="row" style="margin-top:14px;justify-content:center;">
+        <button class="btn secondary" id="undoBtn">↺ Annulla ultimo</button>
+      </div>
+      <p class="legend-note">Formule: % positiva = (# + +) / totale · % perfetta = # / totale · Efficienza = [(# + +) − (/ + =)] / totale</p>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="view" id="view-stats">
+    <div class="card">
+      <h2>Filtra per sessione</h2>
+      <select id="statsSessionFilter"><option value="all">Tutte le sessioni</option></select>
+    </div>
+    <div class="card">
+      <h2>Statistiche per giocatore</h2>
+      <div style="overflow-x:auto;">
+        <table id="statsTable">
+          <thead><tr>
+            <th class="name-col">Giocatore</th><th>Tot</th><th>#</th><th>+</th><th>!</th><th>−</th><th>/</th><th>=</th>
+            <th>% Positiva</th><th>% Perfetta</th><th>Efficienza</th>
+          </tr></thead>
+          <tbody id="statsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- RADAR -->
+  <div class="view" id="view-radar">
+    <div class="card">
+      <h2>Seleziona giocatori da confrontare</h2>
+      <div class="compare-list" id="compareList"></div>
+      <canvas id="radarChart" height="320"></canvas>
+      <p class="legend-note">Assi in scala 0–100%. L'efficienza (range teorico −100%/+100%) è riportata come raccolta separatamente sotto al grafico.</p>
+      <div id="effList" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <!-- PLAYERS -->
+  <div class="view" id="view-players">
+    <div class="card">
+      <h2>Gestione roster (8 ricevitori)</h2>
+      <div id="playerEditGrid" class="row" style="flex-direction:column;align-items:stretch;gap:8px;"></div>
+    </div>
+  </div>
+
+  <!-- DATA -->
+  <div class="view" id="view-data">
+    <div class="card">
+      <h2>Esporta / Importa</h2>
+      <div class="row">
+        <button class="btn" id="exportRawBtn">Esporta dati grezzi (CSV)</button>
+        <button class="btn" id="exportStatsBtn">Esporta statistiche (CSV)</button>
+      </div>
+      <div class="row" style="margin-top:12px;">
+        <input type="file" id="importFile" accept=".csv">
+        <button class="btn secondary" id="importBtn">Importa CSV grezzo</button>
+      </div>
+      <div class="row" style="margin-top:20px;">
+        <button class="btn danger" id="resetBtn">Cancella tutti i dati</button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const LS_PLAYERS = 'ricezione_players_v1';
+const LS_EVENTS = 'ricezione_events_v1';
+const LS_SESSIONS = 'ricezione_sessions_v1';
+
+let players = JSON.parse(localStorage.getItem(LS_PLAYERS) || 'null') || Array.from({length:8},(_,i)=>({id:'p'+(i+1), name:'Giocatore '+(i+1)}));
+let events = JSON.parse(localStorage.getItem(LS_EVENTS) || '[]'); // {player, code, sessionId, ts}
+let sessions = JSON.parse(localStorage.getItem(LS_SESSIONS) || '[]'); // {id, date, opp}
+let currentSession = sessions.length ? sessions[sessions.length-1].id : null;
+let selectedPlayer = players[0]?.id || null;
+let compareSelection = new Set(players.map(p=>p.id));
+let radarChart = null;
+
+function save(){
+  localStorage.setItem(LS_PLAYERS, JSON.stringify(players));
+  localStorage.setItem(LS_EVENTS, JSON.stringify(events));
+  localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
+}
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 1400);
+}
+
+// ---------- NAV ----------
+document.querySelectorAll('nav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    document.getElementById('view-'+btn.dataset.view).classList.add('active');
+    if(btn.dataset.view==='stats') renderStats();
+    if(btn.dataset.view==='radar') renderRadar();
+    if(btn.dataset.view==='players') renderPlayerEdit();
+  });
+});
+
+// ---------- SESSIONS ----------
+function renderSessionTags(){
+  const box = document.getElementById('sessTags');
+  box.innerHTML = '';
+  sessions.slice().reverse().forEach(s=>{
+    const tag = document.createElement('span');
+    tag.className = 'session-tag'+(s.id===currentSession?' active':'');
+    tag.textContent = `${s.date}${s.opp ? ' · '+s.opp : ''}`;
+    tag.onclick = ()=>{ currentSession = s.id; renderSessionTags(); renderLiveTally(); };
+    box.appendChild(tag);
+  });
+  const sel = document.getElementById('statsSessionFilter');
+  sel.innerHTML = '<option value="all">Tutte le sessioni</option>' +
+    sessions.map(s=>`<option value="${s.id}">${s.date}${s.opp?' · '+s.opp:''}</option>`).join('');
+}
+document.getElementById('newSessBtn').addEventListener('click', ()=>{
+  const date = document.getElementById('sessDate').value || new Date().toISOString().slice(0,10);
+  const opp = document.getElementById('sessOpp').value.trim();
+  const id = 's'+Date.now();
+  sessions.push({id, date, opp});
+  currentSession = id;
+  save(); renderSessionTags(); toast('Nuova sessione creata');
+});
+
+// ---------- PLAYER SELECT (entry) ----------
+function renderEntryPlayerGrid(){
+  const grid = document.getElementById('entryPlayerGrid');
+  grid.innerHTML = '';
+  players.forEach(p=>{
+    const chip = document.createElement('div');
+    chip.className = 'player-chip'+(p.id===selectedPlayer?' selected':'');
+    chip.textContent = p.name;
+    chip.onclick = ()=>{ selectedPlayer = p.id; renderEntryPlayerGrid(); renderLiveTally();
+      document.getElementById('entryPlayerLabel').textContent = '— '+p.name; };
+    grid.appendChild(chip);
+  });
+  const p = players.find(x=>x.id===selectedPlayer);
+  document.getElementById('entryPlayerLabel').textContent = p ? '— '+p.name : '';
+}
+
+// ---------- CODE ENTRY ----------
+document.querySelectorAll('.code-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    if(!selectedPlayer){ toast('Seleziona un giocatore'); return; }
+    if(!currentSession){
+      const id = 's'+Date.now();
+      sessions.push({id, date:new Date().toISOString().slice(0,10), opp:''});
+      currentSession = id; save(); renderSessionTags();
+    }
+    events.push({player:selectedPlayer, code:btn.dataset.code, sessionId:currentSession, ts:Date.now()});
+    save(); renderLiveTally();
+  });
+});
+document.getElementById('undoBtn').addEventListener('click', ()=>{
+  for(let i=events.length-1;i>=0;i--){
+    if(events[i].player===selectedPlayer && events[i].sessionId===currentSession){
+      events.splice(i,1); save(); renderLiveTally(); toast('Ultimo evento annullato'); return;
+    }
+  }
+});
+function renderLiveTally(){
+  const box = document.getElementById('liveTally');
+  if(!selectedPlayer){ box.innerHTML=''; return; }
+  const rel = events.filter(e=>e.player===selectedPlayer && e.sessionId===currentSession);
+  const c = code=>rel.filter(e=>e.code===code).length;
+  const tot = rel.length;
+  box.innerHTML = `<span>Tot: <b>${tot}</b></span><span>#: <b>${c('#')}</b></span><span>+: <b>${c('+')}</b></span>
+    <span>!: <b>${c('!')}</b></span><span>−: <b>${c('-')}</b></span><span>/: <b>${c('/')}</b></span><span>=: <b>${c('=')}</b></span>`;
+}
+
+// ---------- STATS CALC ----------
+function computeStats(sessionFilter){
+  return players.map(p=>{
+    const rel = events.filter(e=>e.player===p.id && (sessionFilter==='all' || e.sessionId===sessionFilter));
+    const c = code=>rel.filter(e=>e.code===code).length;
+    const tot = rel.length;
+    const perf = c('#'), pos = c('+'), half=c('!'), neg=c('-'), err=c('/'), ace=c('=');
+    const pctPos = tot? ((perf+pos)/tot*100) : 0;
+    const pctPerf = tot? (perf/tot*100) : 0;
+    const eff = tot? (((perf+pos)-(err+ace))/tot*100) : 0;
+    return {name:p.name, id:p.id, tot, perf, pos, half, neg, err, ace, pctPos, pctPerf, eff};
+  });
+}
+document.getElementById('statsSessionFilter').addEventListener('change', renderStats);
+function renderStats(){
+  const filter = document.getElementById('statsSessionFilter').value;
+  const stats = computeStats(filter);
+  const body = document.getElementById('statsBody');
+  if(stats.every(s=>s.tot===0)){
+    body.innerHTML = `<tr><td colspan="10" class="empty">Nessun dato inserito ancora</td></tr>`;
+    return;
+  }
+  body.innerHTML = stats.map(s=>`
+    <tr>
+      <td class="name-col">${s.name}</td>
+      <td>${s.tot}</td><td>${s.perf}</td><td>${s.pos}</td><td>${s.half}</td><td>${s.neg}</td><td>${s.err}</td><td>${s.ace}</td>
+      <td class="pos-val">${s.pctPos.toFixed(1)}%</td>
+      <td class="pos-val">${s.pctPerf.toFixed(1)}%</td>
+      <td class="${s.eff>=0?'pos-val':'neg-val'}">${s.eff.toFixed(1)}%</td>
+    </tr>`).join('');
+}
+
+// ---------- RADAR ----------
+function renderCompareList(){
+  const box = document.getElementById('compareList');
+  box.innerHTML = '';
+  players.forEach(p=>{
+    const label = document.createElement('label');
+    label.innerHTML = `<input type="checkbox" ${compareSelection.has(p.id)?'checked':''}> ${p.name}`;
+    label.querySelector('input').onchange = e=>{
+      if(e.target.checked) compareSelection.add(p.id); else compareSelection.delete(p.id);
+      renderRadar();
+    };
+    box.appendChild(label);
+  });
+}
+function renderRadar(){
+  renderCompareList();
+  const stats = computeStats('all').filter(s=>compareSelection.has(s.id));
+  const ctx = document.getElementById('radarChart');
+  const datasets = stats.map((s,i)=>{
+    const hues = ['#ff7a1a','#2ea8ff','#33c17a','#f2c744','#ef4d5e','#b26cf2','#43e0e0','#f27fb0'];
+    const color = hues[i % hues.length];
+    return {
+      label: s.name,
+      data: [s.pctPos, s.pctPerf, Math.max(0,(s.eff+100)/2)],
+      backgroundColor: color+'33',
+      borderColor: color,
+      pointBackgroundColor: color,
+      borderWidth: 2
+    };
+  });
+  if(radarChart) radarChart.destroy();
+  radarChart = new Chart(ctx, {
+    type:'radar',
+    data:{ labels:['% Positiva','% Perfetta','Efficienza (norm.)'], datasets },
+    options:{
+      scales:{ r:{ min:0, max:100, ticks:{color:'#9aa4bd', backdropColor:'transparent'},
+        grid:{color:'#2a3450'}, angleLines:{color:'#2a3450'}, pointLabels:{color:'#eef1f8'} } },
+      plugins:{ legend:{ labels:{ color:'#eef1f8' } } }
+    }
+  });
+  document.getElementById('effList').innerHTML = stats.map(s=>
+    `<span class="session-tag">${s.name}: eff. reale <b class="${s.eff>=0?'pos-val':'neg-val'}">${s.eff.toFixed(1)}%</b></span>`
+  ).join('');
+}
+
+// ---------- PLAYERS EDIT ----------
+function renderPlayerEdit(){
+  const box = document.getElementById('playerEditGrid');
+  box.innerHTML = '';
+  players.forEach((p,i)=>{
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span style="width:24px;color:var(--text-dim);">#${i+1}</span>
+      <input type="text" value="${p.name}" data-id="${p.id}" style="flex:1;">`;
+    row.querySelector('input').addEventListener('input', e=>{
+      p.name = e.target.value; save();
+    });
+    box.appendChild(row);
+  });
+}
+
+// ---------- EXPORT / IMPORT ----------
+function downloadCSV(filename, rows){
+  const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+}
+document.getElementById('exportRawBtn').addEventListener('click', ()=>{
+  const rows = [['giocatore_id','giocatore_nome','codice','sessione_id','data','avversario','timestamp']];
+  events.forEach(e=>{
+    const p = players.find(x=>x.id===e.player);
+    const s = sessions.find(x=>x.id===e.sessionId);
+    rows.push([e.player, p?p.name:'', e.code, e.sessionId, s?s.date:'', s?s.opp:'', new Date(e.ts).toISOString()]);
+  });
+  downloadCSV('ricezione_dati_grezzi.csv', rows);
+});
+document.getElementById('exportStatsBtn').addEventListener('click', ()=>{
+  const stats = computeStats('all');
+  const rows = [['giocatore','totale','#','+','!','-','/','=','%_positiva','%_perfetta','efficienza']];
+  stats.forEach(s=>rows.push([s.name,s.tot,s.perf,s.pos,s.half,s.neg,s.err,s.ace,
+    s.pctPos.toFixed(1),s.pctPerf.toFixed(1),s.eff.toFixed(1)]));
+  downloadCSV('ricezione_statistiche.csv', rows);
+});
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  const file = document.getElementById('importFile').files[0];
+  if(!file){ toast('Seleziona un file CSV'); return; }
+  const reader = new FileReader();
+  reader.onload = ev=>{
+    const lines = ev.target.result.split('\n').filter(l=>l.trim());
+    const header = lines[0];
+    let imported = 0;
+    for(let i=1;i<lines.length;i++){
+      const cols = lines[i].match(/(".*?"|[^,]+)(?=,|$)/g)?.map(c=>c.replace(/^"|"$/g,'').replace(/""/g,'"'));
+      if(!cols || cols.length < 6) continue;
+      const [pid, pname, code, sid, sdate, sopp] = cols;
+      if(!players.find(p=>p.id===pid)) continue;
+      if(!sessions.find(s=>s.id===sid)) sessions.push({id:sid, date:sdate, opp:sopp});
+      events.push({player:pid, code, sessionId:sid, ts:Date.now()});
+      imported++;
+    }
+    save(); renderSessionTags(); renderStats();
+    toast(`Importati ${imported} eventi`);
+  };
+  reader.readAsText(file);
+});
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  if(confirm('Cancellare TUTTI i dati (giocatori, sessioni, eventi)? Operazione irreversibile.')){
+    localStorage.removeItem(LS_PLAYERS); localStorage.removeItem(LS_EVENTS); localStorage.removeItem(LS_SESSIONS);
+    location.reload();
+  }
+});
+
+// ---------- INIT ----------
+document.getElementById('sessDate').value = new Date().toISOString().slice(0,10);
+renderEntryPlayerGrid();
+renderSessionTags();
+renderLiveTally();
+</script>
+</body>
+</html>
