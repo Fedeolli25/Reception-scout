@@ -73,6 +73,7 @@
 <header>
   <h1>🏐 Analisi Qualità Ricezione</h1>
   <p>Percentuale positiva · Percentuale perfetta · Efficienza — scala #, +, !, -, /, =</p>
+  <p id="globalSyncStatus" style="font-size:.75rem;color:var(--text-dim);margin-top:6px;">● non configurato</p>
 </header>
 
 <nav>
@@ -80,6 +81,7 @@
   <button data-view="stats">Statistiche</button>
   <button data-view="radar">Confronto Radar</button>
   <button data-view="players">Giocatori</button>
+  <button data-view="sync">Sincronizzazione</button>
   <button data-view="data">Dati / Export</button>
 </nav>
 
@@ -162,6 +164,16 @@
   <!-- DATA -->
   <div class="view" id="view-data">
     <div class="card">
+      <h2>Sincronizzazione multi-dispositivo</h2>
+      <p class="legend-note">Incolla qui l'URL della Web App di Google Apps Script (uguale su tutti i dispositivi) per vedere lo stesso storico ovunque.</p>
+      <div class="row">
+        <input type="text" id="backendUrlInput" placeholder="https://script.google.com/macros/s/..../exec" style="flex:1;min-width:260px;">
+        <button class="btn" id="saveBackendBtn">Salva</button>
+        <button class="btn secondary" id="syncNowBtn">Sincronizza ora</button>
+      </div>
+      <p class="legend-note" id="syncStatusText">Stato: non configurato</p>
+    </div>
+    <div class="card">
       <h2>Esporta / Importa</h2>
       <div class="row">
         <button class="btn" id="exportRawBtn">Esporta dati grezzi (CSV)</button>
@@ -185,25 +197,106 @@
 const LS_PLAYERS = 'ricezione_players_v1';
 const LS_EVENTS = 'ricezione_events_v1';
 const LS_SESSIONS = 'ricezione_sessions_v1';
+const LS_BACKEND = 'ricezione_backend_url_v1';
 
 let players = JSON.parse(localStorage.getItem(LS_PLAYERS) || 'null') || Array.from({length:8},(_,i)=>({id:'p'+(i+1), name:'Giocatore '+(i+1)}));
-let events = JSON.parse(localStorage.getItem(LS_EVENTS) || '[]'); // {player, code, sessionId, ts}
+let events = JSON.parse(localStorage.getItem(LS_EVENTS) || '[]'); // {id, player, code, sessionId, ts}
 let sessions = JSON.parse(localStorage.getItem(LS_SESSIONS) || '[]'); // {id, date, opp}
 let currentSession = sessions.length ? sessions[sessions.length-1].id : null;
 let selectedPlayer = players[0]?.id || null;
 let compareSelection = new Set(players.map(p=>p.id));
 let radarChart = null;
+let backendUrl = localStorage.getItem(LS_BACKEND) || '';
+let syncing = false;
 
-function save(){
+function uid(){ return 'e'+Date.now()+Math.random().toString(36).slice(2,7); }
+
+function persistLocal(){
   localStorage.setItem(LS_PLAYERS, JSON.stringify(players));
   localStorage.setItem(LS_EVENTS, JSON.stringify(events));
   localStorage.setItem(LS_SESSIONS, JSON.stringify(sessions));
 }
+function save(){ persistLocal(); } // kept for backward-compat calls
 function toast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 1400);
 }
+
+// ---------- BACKEND SYNC (JSONP verso Google Apps Script) ----------
+function jsonp(url, params){
+  return new Promise((resolve, reject)=>{
+    const cbName = 'jsonp_cb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+    const script = document.createElement('script');
+    const cleanup = ()=>{ delete window[cbName]; script.remove(); };
+    window[cbName] = (data)=>{ cleanup(); resolve(data); };
+    const qs = new URLSearchParams({...params, callback:cbName}).toString();
+    script.src = url + (url.includes('?') ? '&' : '?') + qs;
+    script.onerror = ()=>{ cleanup(); reject(new Error('Errore di rete JSONP')); };
+    document.body.appendChild(script);
+    setTimeout(()=>{ if(window[cbName]){ cleanup(); reject(new Error('Timeout')); } }, 12000);
+  });
+}
+function setSyncStatus(state){
+  const map = {
+    'off': '● modalità solo locale (nessun backend configurato)',
+    'loading': '● sincronizzazione in corso…',
+    'ok': '● sincronizzato — ' + new Date().toLocaleTimeString('it-IT'),
+    'error': '● errore di sincronizzazione (dati locali mantenuti)'
+  };
+  const colors = { off:'var(--text-dim)', loading:'var(--mid)', ok:'var(--good)', error:'var(--bad)' };
+  const badge = document.getElementById('globalSyncStatus');
+  const txt = document.getElementById('syncStatusText');
+  if(badge){ badge.textContent = map[state]; badge.style.color = colors[state]; }
+  if(txt){ txt.textContent = 'Stato: ' + map[state]; }
+}
+async function backendCall(action, params={}){
+  if(!backendUrl) return null;
+  try{
+    const data = await jsonp(backendUrl, {action, ...params});
+    return data;
+  }catch(err){
+    setSyncStatus('error');
+    console.error(err);
+    return null;
+  }
+}
+async function loadFromBackend(silent){
+  if(!backendUrl) { setSyncStatus('off'); return; }
+  if(!silent) setSyncStatus('loading');
+  const data = await backendCall('getAll');
+  if(data && !data.error){
+    players = (data.players && data.players.length) ? data.players : players;
+    sessions = data.sessions || [];
+    events = (data.events || []).map(e=>({...e, ts:Number(e.ts)}));
+    if(!sessions.find(s=>s.id===currentSession)) currentSession = sessions.length ? sessions[sessions.length-1].id : null;
+    if(!players.find(p=>p.id===selectedPlayer)) selectedPlayer = players[0]?.id || null;
+    persistLocal();
+    refreshAllViews();
+    setSyncStatus('ok');
+  } else if(data && data.error){
+    setSyncStatus('error');
+  }
+}
+function refreshAllViews(){
+  renderSessionTags();
+  renderEntryPlayerGrid();
+  renderLiveTally();
+  if(document.getElementById('view-stats').classList.contains('active')) renderStats();
+  if(document.getElementById('view-radar').classList.contains('active')) renderRadar();
+  if(document.getElementById('view-players').classList.contains('active')) renderPlayerEdit();
+}
+document.getElementById('backendUrlInput').value = backendUrl;
+document.getElementById('saveBackendBtn').addEventListener('click', ()=>{
+  const val = document.getElementById('backendUrlInput').value.trim();
+  backendUrl = val;
+  localStorage.setItem(LS_BACKEND, val);
+  toast(val ? 'Backend salvato' : 'Backend rimosso');
+  if(val) loadFromBackend(false); else setSyncStatus('off');
+});
+document.getElementById('syncNowBtn').addEventListener('click', ()=>loadFromBackend(false));
+// Sincronizzazione automatica ogni 20s se il backend è configurato
+setInterval(()=>{ if(backendUrl && !syncing) loadFromBackend(true); }, 20000);
 
 // ---------- NAV ----------
 document.querySelectorAll('nav button').forEach(btn=>{
@@ -239,7 +332,8 @@ document.getElementById('newSessBtn').addEventListener('click', ()=>{
   const id = 's'+Date.now();
   sessions.push({id, date, opp});
   currentSession = id;
-  save(); renderSessionTags(); toast('Nuova sessione creata');
+  persistLocal(); renderSessionTags(); toast('Nuova sessione creata');
+  backendCall('addSession', {id, date, opp});
 });
 
 // ---------- PLAYER SELECT (entry) ----------
@@ -263,18 +357,25 @@ document.querySelectorAll('.code-btn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     if(!selectedPlayer){ toast('Seleziona un giocatore'); return; }
     if(!currentSession){
-      const id = 's'+Date.now();
-      sessions.push({id, date:new Date().toISOString().slice(0,10), opp:''});
-      currentSession = id; save(); renderSessionTags();
+      const sid = 's'+Date.now();
+      const sdate = new Date().toISOString().slice(0,10);
+      sessions.push({id:sid, date:sdate, opp:''});
+      currentSession = sid; persistLocal(); renderSessionTags();
+      backendCall('addSession', {id:sid, date:sdate, opp:''});
     }
-    events.push({player:selectedPlayer, code:btn.dataset.code, sessionId:currentSession, ts:Date.now()});
-    save(); renderLiveTally();
+    const ev = {id:uid(), player:selectedPlayer, code:btn.dataset.code, sessionId:currentSession, ts:Date.now()};
+    events.push(ev);
+    persistLocal(); renderLiveTally();
+    backendCall('addEvent', ev);
   });
 });
 document.getElementById('undoBtn').addEventListener('click', ()=>{
   for(let i=events.length-1;i>=0;i--){
     if(events[i].player===selectedPlayer && events[i].sessionId===currentSession){
-      events.splice(i,1); save(); renderLiveTally(); toast('Ultimo evento annullato'); return;
+      const removed = events.splice(i,1)[0];
+      persistLocal(); renderLiveTally(); toast('Ultimo evento annullato');
+      backendCall('deleteEvent', {id:removed.id});
+      return;
     }
   }
 });
@@ -374,9 +475,9 @@ function renderPlayerEdit(){
     row.className = 'row';
     row.innerHTML = `<span style="width:24px;color:var(--text-dim);">#${i+1}</span>
       <input type="text" value="${p.name}" data-id="${p.id}" style="flex:1;">`;
-    row.querySelector('input').addEventListener('input', e=>{
-      p.name = e.target.value; save();
-    });
+    const inp = row.querySelector('input');
+    inp.addEventListener('input', e=>{ p.name = e.target.value; persistLocal(); });
+    inp.addEventListener('change', e=>{ backendCall('updatePlayer', {id:p.id, name:p.name}); });
     box.appendChild(row);
   });
 }
@@ -428,8 +529,9 @@ document.getElementById('importBtn').addEventListener('click', ()=>{
   };
   reader.readAsText(file);
 });
-document.getElementById('resetBtn').addEventListener('click', ()=>{
-  if(confirm('Cancellare TUTTI i dati (giocatori, sessioni, eventi)? Operazione irreversibile.')){
+document.getElementById('resetBtn').addEventListener('click', async ()=>{
+  if(confirm('Cancellare TUTTI i dati (sessioni ed eventi, su questo dispositivo e sul backend condiviso)? Operazione irreversibile.')){
+    if(backendUrl) await backendCall('resetAll');
     localStorage.removeItem(LS_PLAYERS); localStorage.removeItem(LS_EVENTS); localStorage.removeItem(LS_SESSIONS);
     location.reload();
   }
@@ -440,6 +542,7 @@ document.getElementById('sessDate').value = new Date().toISOString().slice(0,10)
 renderEntryPlayerGrid();
 renderSessionTags();
 renderLiveTally();
+if(backendUrl){ loadFromBackend(false); } else { setSyncStatus('off'); }
 </script>
 </body>
 </html>
